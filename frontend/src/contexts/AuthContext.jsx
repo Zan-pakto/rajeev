@@ -1,105 +1,60 @@
-import { createContext, useContext, useCallback } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { authApi } from '../lib/api';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import axios from 'axios';
 
-const AuthContext = createContext({});
-
-// Helper function to transform error response
-const transformError = (error) => {
-    if (error.response?.data?.error) {
-        return new Error(error.response.data.error);
-    }
-    if (error.message === 'Network Error') {
-        return new Error('Unable to connect to server. Please check your internet connection.');
-    }
-    return error;
-};
+const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-    const queryClient = useQueryClient();
-    const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-    // Get current user query
-    const { data: auth, isLoading: isAuthLoading } = useQuery({
-        queryKey: ['auth'],
-        queryFn: authApi.getCurrentUser,
-        retry: false,
-        staleTime: 1000 * 60 * 5, // 5 minutes
-        onError: (error) => {
-            // Don't show errors for auth check - just redirect if needed
-            if (error.response?.status === 401) {
-                queryClient.setQueryData(['auth'], null);
-            }
-        }
-    });
+  useEffect(() => {
+    checkAuth();
+  }, []);
 
-    // Signup mutation
-    const signup = useMutation({
-        mutationFn: authApi.signup,
-        onSuccess: () => {
-            navigate('/login', {
-                state: { message: 'Account created successfully! Please log in.' }
-            });
-        },
-        onError: (error) => {
-            throw transformError(error);
-        }
-    });
+  const checkAuth = async () => {
+    try {
+      const response = await axios.get('/api/auth/me', { withCredentials: true });
+      setUser(response.data.user);
+    } catch (error) {
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    // Login mutation
-    const login = useMutation({
-        mutationFn: authApi.login,
-        onSuccess: (data) => {
-            queryClient.setQueryData(['auth'], data);
-            navigate('/');
-        },
-        onError: (error) => {
-            throw transformError(error);
-        }
-    });
+  const login = async (email, password) => {
+    const response = await axios.post('/api/auth/login', { email, password }, { withCredentials: true });
+    setUser(response.data.user);
+    return response.data;
+  };
 
-    // Logout mutation
-    const logout = useMutation({
-        mutationFn: authApi.logout,
-        onSuccess: () => {
-            queryClient.setQueryData(['auth'], null);
-            navigate('/login');
-        },
-        onError: (error) => {
-            console.error('Logout error:', error);
-            // Force logout even if the API call fails
-            queryClient.setQueryData(['auth'], null);
-            navigate('/login');
-        }
-    });
+  const register = async (userData) => {
+    const response = await axios.post('/api/auth/register', userData);
+    return response.data;
+  };
 
-    const handleLogout = useCallback(() => {
-        logout.mutate();
-    }, [logout]);
+  const logout = async () => {
+    await axios.post('/api/auth/logout', {}, { withCredentials: true });
+    setUser(null);
+  };
 
-    const value = {
-        user: auth?.user,
-        isAuthenticated: !!auth?.user,
-        isAuthLoading,
-        signup: signup.mutate,
-        login: login.mutate,
-        logout: handleLogout,
-        authError: signup.error || login.error || logout.error,
-        isAuthenticating: signup.isPending || login.isPending || logout.isPending,
-    };
+  const updateProfile = async (userData) => {
+    const response = await axios.put('/api/auth/profile', userData, { withCredentials: true });
+    setUser(response.data.user);
+    return response.data;
+  };
 
-    return (
-        <AuthContext.Provider value={value}>
-            {children}
-        </AuthContext.Provider>
-    );
+  return (
+    <AuthContext.Provider value={{ user, loading, login, register, logout, updateProfile }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
 
 export const useAuth = () => {
-    const context = useContext(AuthContext);
-    if (!context) {
-        throw new Error('useAuth must be used within an AuthProvider');
-    }
-    return context;
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 }; 
